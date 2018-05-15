@@ -116,9 +116,74 @@ goto :: Pos -> IO ()
 goto (x,y) = putStr ("\ESC[" ++ show y ++ ";" ++ show x ++ "H")
 
 {-
+main :: IO ()
 main = do
-  putGrid [[B,O,O],[O,X,O],[X,X,X]]
+  run empty O
 -}
 
+-- incorporate game tree
+-- want to return all grids that result from making a move in a blank space
+
+data Tree a = Node a [Tree a] deriving Show
+
+gametree :: Grid -> Player -> Tree Grid
+gametree g p = Node g [gametree g' (next p) | g' <- moves g p]
+
+moves :: Grid -> Player -> [Grid]
+moves g p
+  | won g = []
+  | full g = []
+  | otherwise = concat [move g i p | i <- [0..((size^2)-1)]]
+
+
+-- want to determine the next best move (for X)
+
+prune :: Int -> Tree a -> Tree a
+prune 0 (Node x _) = Node x []
+prune n (Node x ts) = Node x [prune (n-1) t | t <- ts]
+
+minimax :: Tree Grid -> Tree (Grid,Player)
+minimax (Node g [])
+  | wins O g = Node (g, O) []
+  | wins X g = Node (g, X) []
+  | otherwise = Node (g, B) []
+minimax (Node g ts)
+  | turn g == O = Node (g, minimum ps) ts'
+  | turn g == X = Node (g, maximum ps) ts'
+                  where 
+                    ts' = map minimax ts
+                    ps = [p | Node (_,p) _ <- ts']
+
+bestmove :: Grid -> Player -> Grid
+bestmove g p = head [g' | Node (g',p') _ <- ts, p' == best]
+  where
+    tree = prune 5 (gametree g p)
+    Node (_,best) ts = minimax tree
+
+run2 :: Grid -> Player -> IO ()
+run2 g p = do
+  cls
+  goto (1,1)
+  putGrid g
+  run2' g p
+
+run2' :: Grid -> Player -> IO ()
+run2' g p
+  | wins O g = putStrLn "Player O wins!\n"
+  | wins X g = putStrLn "Player X wins!\n"
+  | full g = putStrLn "It's a draw! \n"
+  | p == O = do
+    i <- getNat (prompt p)
+    case move g i p of
+      [] -> do
+        putStrLn "Error: Invalid Move"
+        run2' g p
+      [g'] -> run2 g' (next p)
+  | p == X = do
+    putStr "Player X is thinking... "
+    (run2 $! (bestmove g p)) (next p)
+
 main :: IO ()
-main = run empty O
+main = do
+  hSetBuffering stdout NoBuffering
+  run2 empty O
